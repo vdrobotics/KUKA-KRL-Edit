@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [Unreleased]
+### Added
+- Fold/unfold actions are now bundled in a single "Folding" submenu in the editor context menu of KRL files: fold/unfold at cursor (also recursively), fold/unfold all blocks, and "Fold All ;FOLD Blocks" / "Unfold All ;FOLD Blocks" for the KUKA `;FOLD … ;ENDFOLD` regions. The commands are also available in the Command Palette under the "KUKA KRL" category while a KRL file is active.
+- The folding commands carry the standard VS Code folding shortcuts (`Ctrl+Shift+[` / `Ctrl+Shift+]`, `Ctrl+K Ctrl+0` / `Ctrl+K Ctrl+J`, `Ctrl+K Ctrl+8` / `Ctrl+K Ctrl+9`, …) scoped to KRL files, so the context menu shows the matching shortcut next to every entry.
+
+---
+
 ## [1.8.2] - 2026-05-31
 ### Added
 - Bundled index of KUKA `$`-system variables (`server/data/system_vars.json`, ~445 entries). Typing `$` now offers system-variable completions (with data type and description), and hovering over a `$`-variable shows its type and description.

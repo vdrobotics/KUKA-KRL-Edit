@@ -38,6 +38,31 @@ interface DeclaredName {
   start: number;
 }
 
+// Folding entries of the KRL context menu. Each KRL command forwards to the
+// built-in editor command, so the menu stays one grouped block instead of
+// scattered palette entries. `editor.*MarkerRegions` hits exactly the
+// ;FOLD ... ;ENDFOLD ranges, because the server reports only those as Region.
+const FOLDING_COMMANDS: Record<string, string> = {
+  'kukaKrl.fold': 'editor.fold',
+  'kukaKrl.unfold': 'editor.unfold',
+  'kukaKrl.foldRecursively': 'editor.foldRecursively',
+  'kukaKrl.unfoldRecursively': 'editor.unfoldRecursively',
+  'kukaKrl.foldAll': 'editor.foldAll',
+  'kukaKrl.unfoldAll': 'editor.unfoldAll',
+  'kukaKrl.foldAllKukaFolds': 'editor.foldAllMarkerRegions',
+  'kukaKrl.unfoldAllKukaFolds': 'editor.unfoldAllMarkerRegions',
+};
+
+function registerFoldingCommands(context: vscode.ExtensionContext): void {
+  for (const [krlCommand, editorCommand] of Object.entries(FOLDING_COMMANDS)) {
+    context.subscriptions.push(
+      vscode.commands.registerCommand(krlCommand, () =>
+        vscode.commands.executeCommand(editorCommand)
+      )
+    );
+  }
+}
+
 function pushConfigToServer(): void {
   if (!client) return;
   const cfg = getValidationConfig();
@@ -71,6 +96,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Create the language client
   client = new LanguageClient('kukaKRL', 'KUKA KRL Language Server', serverOptions, clientOptions);
+
+  // Fold/unfold entries of the KRL context menu
+  registerFoldingCommands(context);
 
   // Register event handlers for document open/change/save
   context.subscriptions.push(

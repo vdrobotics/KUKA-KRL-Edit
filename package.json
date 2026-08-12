@@ -2,7 +2,7 @@
   "name": "kuka-krl-edit",
   "displayName": "KUKA KRL Edit",
   "description": "Language features for KUKA KRL",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "publisher": "VDRobotics",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -57,6 +57,181 @@
         "path": "./client/syntaxes/krl.tmLanguage.json"
       }
     ],
+    "commands": [
+      {
+        "command": "kukaKrl.fold",
+        "title": "Fold Block at Cursor",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.unfold",
+        "title": "Unfold Block at Cursor",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.foldRecursively",
+        "title": "Fold Block Recursively",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.unfoldRecursively",
+        "title": "Unfold Block Recursively",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.foldAll",
+        "title": "Fold All Blocks",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.unfoldAll",
+        "title": "Unfold All Blocks",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.foldAllKukaFolds",
+        "title": "Fold All ;FOLD Blocks",
+        "category": "KUKA KRL"
+      },
+      {
+        "command": "kukaKrl.unfoldAllKukaFolds",
+        "title": "Unfold All ;FOLD Blocks",
+        "category": "KUKA KRL"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "kukaKrl.fold",
+        "key": "ctrl+shift+[",
+        "mac": "alt+cmd+[",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.unfold",
+        "key": "ctrl+shift+]",
+        "mac": "alt+cmd+]",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.foldRecursively",
+        "key": "ctrl+k ctrl+[",
+        "mac": "cmd+k cmd+[",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.unfoldRecursively",
+        "key": "ctrl+k ctrl+]",
+        "mac": "cmd+k cmd+]",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.foldAll",
+        "key": "ctrl+k ctrl+0",
+        "mac": "cmd+k cmd+0",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.unfoldAll",
+        "key": "ctrl+k ctrl+j",
+        "mac": "cmd+k cmd+j",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.foldAllKukaFolds",
+        "key": "ctrl+k ctrl+8",
+        "mac": "cmd+k cmd+8",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      },
+      {
+        "command": "kukaKrl.unfoldAllKukaFolds",
+        "key": "ctrl+k ctrl+9",
+        "mac": "cmd+k cmd+9",
+        "when": "editorTextFocus && editorLangId == krl && foldingEnabled"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "kukaKrl.foldingMenu",
+        "label": "Folding"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "kukaKrl.foldingMenu",
+          "group": "2_krl@1",
+          "when": "editorLangId == krl"
+        }
+      ],
+      "kukaKrl.foldingMenu": [
+        {
+          "command": "kukaKrl.fold",
+          "group": "1_cursor@1"
+        },
+        {
+          "command": "kukaKrl.unfold",
+          "group": "1_cursor@2"
+        },
+        {
+          "command": "kukaKrl.foldRecursively",
+          "group": "1_cursor@3"
+        },
+        {
+          "command": "kukaKrl.unfoldRecursively",
+          "group": "1_cursor@4"
+        },
+        {
+          "command": "kukaKrl.foldAll",
+          "group": "2_all@1"
+        },
+        {
+          "command": "kukaKrl.unfoldAll",
+          "group": "2_all@2"
+        },
+        {
+          "command": "kukaKrl.foldAllKukaFolds",
+          "group": "3_kukaFolds@1"
+        },
+        {
+          "command": "kukaKrl.unfoldAllKukaFolds",
+          "group": "3_kukaFolds@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kukaKrl.fold",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.unfold",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.foldRecursively",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.unfoldRecursively",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.foldAll",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.unfoldAll",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.foldAllKukaFolds",
+          "when": "editorLangId == krl"
+        },
+        {
+          "command": "kukaKrl.unfoldAllKukaFolds",
+          "when": "editorLangId == krl"
+        }
+      ]
+    },
     "configuration": {
       "title": "KUKA KRL Edit",
       "properties": {

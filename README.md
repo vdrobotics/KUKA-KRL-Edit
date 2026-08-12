@@ -11,6 +11,7 @@ This extension is maintained by VDRobotics and is based on the original KUKA KRL
 - Go to definition for functions and variables (case-insensitive, like KRL itself)
 - Find All References (`Shift+F12`, right-click → "Find All References") for functions, structs and variables across the workspace
 - Folding for `DEF`/`DEFFCT`/`DEFDAT`, `IF`, `LOOP`, `FOR`, `WHILE`, `SWITCH`, `STRUC`, `REPEAT` and KUKA `;FOLD … ;ENDFOLD` blocks
+- All fold/unfold actions grouped in a single "Folding" submenu in the editor context menu (right-click in a KRL file), including "Fold All ;FOLD Blocks" / "Unfold All ;FOLD Blocks" for the KUKA folds
 - Hover to view function parameters, and the data type and description of KUKA `$`-system variables
 - Autocompletion for KUKA `$`-system variables: type `$` to get a list of system variables with their data type and description
 - Warning when a GLOBAL variable is missing a DECL, SIGNAL or STRUC
