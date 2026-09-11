@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [1.8.4] - 2026-09-11
+### Fixed
+- `LOOP`, `ENDLOOP` and `STEP` are no longer reported as undeclared identifiers.
+- The undeclared-identifier allow-list now covers every keyword highlighted by the KRL grammar, adding `CHAR`, `POS`, `ENUM`, `CONST`, `SIGNAL`, `EXTFCT`, `B_EXOR`, `CIRC_REL`, `ASYPTP`, `ASYSTOP`, `ASYCONT`, `ASYCANCEL`, `C_ORI`, `CA`, `TIME_BLOCK`, `START`, `PART`, `ENABLE`, `DISABLE` and `PATH`. These keywords are now also offered as completions.
+- `GLOBAL CHAR …` and `GLOBAL POS …` declarations are now indexed as variables, while the values of a `GLOBAL ENUM` declaration are not mistaken for variables.
+
+---
+
+## [1.8.3] - 2026-08-12
 ### Added
 - Fold/unfold actions are now bundled in a single "Folding" submenu in the editor context menu of KRL files: fold/unfold at cursor (also recursively), fold/unfold all blocks, and "Fold All ;FOLD Blocks" / "Unfold All ;FOLD Blocks" for the KUKA `;FOLD … ;ENDFOLD` regions. The commands are also available in the Command Palette under the "KUKA KRL" category while a KRL file is active.
 - The folding commands carry the standard VS Code folding shortcuts (`Ctrl+Shift+[` / `Ctrl+Shift+]`, `Ctrl+K Ctrl+0` / `Ctrl+K Ctrl+J`, `Ctrl+K Ctrl+8` / `Ctrl+K Ctrl+9`, …) scoped to KRL files, so the context menu shows the matching shortcut next to every entry.

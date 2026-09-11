@@ -101,7 +101,7 @@ connection.onNotification('custom/setValidationConfig', (cfg) => {
 const CODE_KEYWORDS = [
     'GLOBAL', 'DEF', 'DEFFCT', 'END', 'ENDFCT', 'RETURN', 'TRIGGER',
     'REAL', 'BOOL', 'DECL', 'IF', 'ELSE', 'ENDIF', 'CONTINUE', 'FOR', 'ENDFOR', 'WHILE',
-    'ENDWHILE', 'REPEAT', 'UNTIL', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE', 'INT', 'STRING', 'PULSE', 'WAIT', 'SEC', 'NULLFRAME', 'THEN',
+    'ENDWHILE', 'LOOP', 'ENDLOOP', 'STEP', 'REPEAT', 'UNTIL', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE', 'INT', 'STRING', 'PULSE', 'WAIT', 'SEC', 'NULLFRAME', 'THEN',
     'CASE', 'DEFAULT', 'SWITCH', 'ENDSWITCH', 'BREAK', 'ABS', 'SIN', 'COS', 'TAN', 'ASIN', 'ACOS', 'ATAN2', 'MAX', 'MIN',
     'DEFDAT', 'ENDDAT', 'PUBLIC', 'STRUC', 'WHEN', 'DISTANCE', 'DO', 'DELAY', 'PRIO', 'LIN', 'PTP', 'DELAY',
     'C_PTP', 'C_LIN', 'C_VEL', 'C_DIS', 'BAS', 'LOAD', 'FRAME', 'IN', 'OUT',
@@ -115,6 +115,9 @@ const CODE_KEYWORDS = [
     'LK', 'EK', 'EB', 'EO', 'EB_ABS', 'INV_POS',
     'VARSTATE', 'WITH', 'MBX_REC', 'SYNC', 'EB_TEST', 'TEST_BRAKE',
     'INTTOSTRWITHPREFIX', 'GET_COLLMON_SET',
+    'CHAR', 'POS', 'ENUM', 'CONST', 'SIGNAL', 'EXTFCT', 'B_EXOR',
+    'CIRC_REL', 'ASYPTP', 'ASYSTOP', 'ASYCONT', 'ASYCANCEL', 'C_ORI', 'CA', 'TIME_BLOCK', 'START', 'PART',
+    'ENABLE', 'DISABLE', 'PATH',
 ];
 // =======================
 // Initialization Handlers
@@ -1198,7 +1201,8 @@ class DeclaredVariableCollector {
         const globalTypeRegex = /^\s*GLOBAL\s+(?:CONST\s+)?(\w+)\s+([^\r\n;]+)/gim;
         while ((match = globalTypeRegex.exec(textWithoutStrucs)) !== null) {
             const type = match[1];
-            if (!CODE_KEYWORDS.includes(type.toUpperCase()))
+            // ENUM values are not variables
+            if (type.toUpperCase() === 'ENUM' || !CODE_KEYWORDS.includes(type.toUpperCase()))
                 continue;
             const varNames = splitVarsRespectingBrackets(match[2])
                 .map(name => name.trim())

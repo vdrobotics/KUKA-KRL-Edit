@@ -2,7 +2,7 @@
   "name": "kuka-krl-edit",
   "displayName": "KUKA KRL Edit",
   "description": "Language features for KUKA KRL",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "publisher": "VDRobotics",
   "license": "MIT",
   "icon": "media/icon.png",
