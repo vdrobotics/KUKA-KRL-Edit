@@ -1,4 +1,4 @@
-import {
+﻿import {
   createConnection,
   TextDocuments,
   ProposedFeatures,
@@ -215,7 +215,7 @@ connection.onInitialized(async () => {
     const files = getAllDatFiles(root);
 
     for (const filePath of files) {
-      const content = fs.readFileSync(filePath, 'utf8');
+      const content = readKrlFile(filePath);
       const uri = URI.file(filePath).toString();
 
       const collector = new DeclaredVariableCollector();
@@ -236,32 +236,42 @@ connection.onInitialized(async () => {
 
 documents.onDidChangeContent(async change => {
   const { document } = change;
-  invalidateWorkspaceCachesForDocument(document.uri);
 
-  extractStrucVariables(document.getText());
+  try {
+    invalidateWorkspaceCachesForDocument(document.uri);
 
-  const collector = new DeclaredVariableCollector();
-  collector.extractFromText(document.getText());
-  fileVariablesMap.set(document.uri, collector.getVariables());
+    extractStrucVariables(document.getText());
 
-  mergedVariables = mergeAllVariables(fileVariablesMap);
-  if (isKrlDocument(document)) {
-    validateDocument(document, connection);
+    const collector = new DeclaredVariableCollector();
+    collector.extractFromText(document.getText());
+    fileVariablesMap.set(document.uri, collector.getVariables());
+
+    mergedVariables = mergeAllVariables(fileVariablesMap);
+    if (isKrlDocument(document)) {
+      validateDocument(document, connection);
+    }
+  } catch (error) {
+    // An error here must not reject, because that would end the server process
+    connection.console.error(`KRL: processing ${document.uri} failed: ${error}`);
   }
-  //logToFile(`Extracted variables: ${JSON.stringify(mergedVariables, null, 2)}`);
 });
 
 documents.onDidOpen(change => {
   const { document } = change;
-  invalidateWorkspaceCachesForDocument(document.uri);
 
-  const collector = new DeclaredVariableCollector();
-  collector.extractFromText(document.getText());
-  fileVariablesMap.set(document.uri, collector.getVariables());
-  mergedVariables = mergeAllVariables(fileVariablesMap);
+  try {
+    invalidateWorkspaceCachesForDocument(document.uri);
 
-  if (isKrlDocument(document)) {
-    validateDocument(document, connection);
+    const collector = new DeclaredVariableCollector();
+    collector.extractFromText(document.getText());
+    fileVariablesMap.set(document.uri, collector.getVariables());
+    mergedVariables = mergeAllVariables(fileVariablesMap);
+
+    if (isKrlDocument(document)) {
+      validateDocument(document, connection);
+    }
+  } catch (error) {
+    connection.console.error(`KRL: processing ${document.uri} failed: ${error}`);
   }
 });
 
@@ -280,6 +290,61 @@ function indexOfIdentifierIgnoreCase(text: string, identifier: string): number {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// KRL identifiers may contain '$' â€” system variables like $VEL_ACT start with it,
+// and customer naming schemes like i$VarName use it inside the name. Matching with
+// '\w' alone splits those names apart, so identifier handling uses these patterns.
+const KRL_IDENTIFIER_SOURCE = '[A-Za-z_$][A-Za-z0-9_$]*';
+const KRL_IDENTIFIER_NAME = new RegExp(`^${KRL_IDENTIFIER_SOURCE}$`);
+
+/** Predefined KRL data types, used to spot declarations written without DECL. */
+const PREDEFINED_TYPE_NAMES = [
+  'INT', 'REAL', 'BOOL', 'CHAR', 'FRAME', 'POS', 'E6POS', 'AXIS', 'E6AXIS',
+  'LOAD', 'LOAD_DATA', 'CHANNEL', 'FDAT', 'LDAT', 'PDAT'
+];
+
+function isKnownTypeName(type: string): boolean {
+  const upperType = type.toUpperCase();
+  return PREDEFINED_TYPE_NAMES.includes(upperType) ||
+    Object.keys(structDefinitions).some(key => key.toUpperCase() === upperType);
+}
+
+/** Extract the declared names from the variable list of a declaration. */
+function declaredNamesOf(varList: string): string[] {
+  return splitVarsRespectingBrackets(varList)
+    .map(name => name.trim())
+    .map(name => name.replace(/\[.*?\]/g, '').trim())   // Remove array brackets
+    .map(name => name.replace(/\s*=\s*[^]*$/, '').trim()) // Remove initializations
+    .filter(name => KRL_IDENTIFIER_NAME.test(name));
+}
+
+/**
+ * Check whether a single line declares `name`.
+ * With `explicitOnly`, only DECL/SIGNAL declarations count; otherwise declarations
+ * written without DECL (common in .dat files, e.g. `INT counter=5`) count too.
+ */
+function declaresVariable(line: string, name: string, explicitOnly: boolean): boolean {
+  const code = stripLineComment(line);
+  const matchesName = (candidate: string) => candidate.toLowerCase() === name.toLowerCase();
+
+  const declMatch = new RegExp(
+    `^\\s*(?:GLOBAL\\s+)?DECL\\s+(?:GLOBAL\\s+)?(?:CONST\\s+)?${KRL_IDENTIFIER_SOURCE}\\s+(.+)$`, 'i'
+  ).exec(code);
+  if (declMatch) return declaredNamesOf(declMatch[1]).some(matchesName);
+
+  const signalMatch = new RegExp(
+    `^\\s*(?:GLOBAL\\s+)?SIGNAL\\s+(${KRL_IDENTIFIER_SOURCE})`, 'i'
+  ).exec(code);
+  if (signalMatch) return matchesName(signalMatch[1]);
+
+  if (explicitOnly) return false;
+
+  const typedMatch = new RegExp(
+    `^\\s*(?:GLOBAL\\s+)?(?:CONST\\s+)?(${KRL_IDENTIFIER_SOURCE})\\s+(.+)$`, 'i'
+  ).exec(code);
+  if (!typedMatch || !isKnownTypeName(typedMatch[1])) return false;
+  return declaredNamesOf(typedMatch[2]).some(matchesName);
 }
 
 function getWorkspaceRootForUri(uri: string): string | null {
@@ -312,8 +377,10 @@ function invalidateWorkspaceCachesForDocument(uri: string): void {
     return;
   }
 
+  // Only drop the caches here. They are rebuilt on demand, so a burst of edits
+  // does not re-index the whole workspace once per keystroke.
   workspaceDeclaredNameCacheByRoot.delete(root);
-  functionsDeclaredByRoot.set(root, getAllFunctionDeclarations(root));
+  functionsDeclaredByRoot.delete(root);
   functionsDeclared = Array.from(functionsDeclaredByRoot.values()).flat();
 }
 
@@ -341,33 +408,38 @@ function getFunctionsForRoot(root: string): FunctionDeclaration[] {
  * Recursively find all .dat files in the workspace directory.
  */
 function getAllDatFiles(dir: string): string[] {
-  const result: string[] = [];
-
-  function recurse(currentDir: string) {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        recurse(fullPath);
-      } else if (entry.isFile() && fullPath.endsWith('.dat')) {
-        result.push(fullPath);
-      }
-    }
-  }
-
-  recurse(dir);
-  return result;
+  return getAllKrlFiles(dir).filter(filePath => filePath.toLowerCase().endsWith('.dat'));
 }
 
 function getAllKrlFiles(dir: string): string[] {
   const result: string[] = [];
+  const visited = new Set<string>();
 
   function recurse(currentDir: string) {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    // Resolving the real path keeps directory junctions that point at a parent
+    // folder from being walked forever, and skips links that lead nowhere.
+    let realDir: string;
+    try {
+      realDir = fs.realpathSync(currentDir).toLowerCase();
+    } catch {
+      return;
+    }
+    if (visited.has(realDir)) return;
+    visited.add(realDir);
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch (error) {
+      // An unreadable folder must never take down the whole workspace scan
+      connection.console.warn(`KRL: skipping unreadable folder ${currentDir}: ${error}`);
+      return;
+    }
+
     for (const entry of entries) {
       const fullPath = path.join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
         recurse(fullPath);
       } else if (entry.isFile() && /\.(src|dat|sub)$/i.test(fullPath)) {
         result.push(fullPath);
@@ -377,6 +449,25 @@ function getAllKrlFiles(dir: string): string[] {
 
   recurse(dir);
   return result;
+}
+
+/** Content of a workspace file, preferring unsaved editor content over the disk. */
+function krlFileContent(filePath: string): string {
+  const uri = filePath.startsWith('file://') ? filePath : URI.file(filePath).toString();
+  const openDocument = documents.get(uri);
+  if (openDocument) return openDocument.getText();
+
+  return readKrlFile(filePath.startsWith('file://') ? URI.parse(filePath).fsPath : filePath);
+}
+
+/** Read a KRL file; an unreadable file is treated as empty instead of throwing. */
+function readKrlFile(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    connection.console.warn(`KRL: cannot read ${filePath}: ${error}`);
+    return '';
+  }
 }
 
 /**
@@ -430,7 +521,7 @@ connection.onDefinition(
     
 
     //Search for name as function first
-    const resultFct = await isFunctionDeclared(functionName,"function", undefined, undefined, undefined, undefined, documentRoot);
+    const resultFct = findFunctionDefinition(functionName, params.textDocument.uri, lines, documentRoot);
     if (resultFct!=undefined) {
       return Location.create(resultFct.uri, {
         start: Position.create(resultFct.line, resultFct.startChar),
@@ -440,51 +531,39 @@ connection.onDefinition(
     
     
     //Search for name as custom user variable type
-    for (const key in structDefinitions) {
-      if (key.toLowerCase() === functionName.toLowerCase()) {
-        const resultStruc = await isFunctionDeclared(functionName,"struc", undefined, undefined, undefined, undefined, documentRoot);
-        if (resultStruc!=undefined) {
-          return Location.create(resultStruc.uri, {
-            start: Position.create(resultStruc.line, resultStruc.startChar),
-            end: Position.create(resultStruc.line, resultStruc.endChar)
-          });
-        }
+    const isKnownStruct = Object.keys(structDefinitions)
+      .some(key => key.toLowerCase() === functionName.toLowerCase());
+
+    if (isKnownStruct) {
+      const resultStruc = findStructDefinition(functionName, documentRoot);
+      if (resultStruc!=undefined) {
+        return Location.create(resultStruc.uri, {
+          start: Position.create(resultStruc.line, resultStruc.startChar),
+          end: Position.create(resultStruc.line, resultStruc.endChar)
+        });
       }
     }
 
-    //Search for name as variable
-    let enclosures = findEnclosuresLines(params.position.line, lines);
-    const rootVariables = getMergedVariablesForRoot(documentRoot);
-    const functionNameLower = functionName.toLowerCase();
-    for (const element of rootVariables) {
-      if (element.name.toLowerCase() === functionNameLower) {
-        // First: try local scope (inside enclosures)
-        const scopedResult = await isFunctionDeclared(
-          functionName,
-          "variable",
-          params.textDocument.uri,
-          enclosures.upperLine,
-          enclosures.bottomLine,
-          lines.join('\n'),
-          documentRoot
-        );
+    //Search for name as variable.
+    // The workspace index is used as the gate, so variables declared in .src and
+    // .sub files that are not open are found too.
+    const enclosures = findEnclosuresLines(params.position.line, lines);
+    const declaredNames = getDeclaredNamesForDocument(doc);
 
-        if (scopedResult) {
-          return Location.create(scopedResult.uri, {
-            start: Position.create(scopedResult.line, scopedResult.startChar),
-            end: Position.create(scopedResult.line, scopedResult.endChar)
-          });
-        }
+    if (declaredNames.has(functionName.toLowerCase())) {
+      const resultVar = findVariableDefinition(
+        functionName,
+        params.textDocument.uri,
+        lines,
+        enclosures,
+        documentRoot
+      );
 
-        // If not found locally, try global search
-        const resultVar = await isFunctionDeclared(functionName, "variable", undefined, undefined, undefined, undefined, documentRoot);
-
-        if (resultVar) {
-          return Location.create(resultVar.uri, {
-            start: Position.create(resultVar.line, resultVar.startChar),
-            end: Position.create(resultVar.line, resultVar.endChar)
-          });
-        }
+      if (resultVar) {
+        return Location.create(resultVar.uri, {
+          start: Position.create(resultVar.line, resultVar.startChar),
+          end: Position.create(resultVar.line, resultVar.endChar)
+        });
       }
     }
 
@@ -513,7 +592,7 @@ connection.onHover(async (params) => {
     return {
       contents: {
         kind: 'markdown',
-        value: `**${systemVar.var_name}** — *${systemVar.var_type}*\n\n${systemVar.var_descr}`
+        value: `**${systemVar.var_name}** â€” *${systemVar.var_type}*\n\n${systemVar.var_descr}`
       }
     };
   }
@@ -523,7 +602,7 @@ connection.onHover(async (params) => {
   const functionName = getWordAtPosition(lineText, params.position.character)?.word;
   if (!functionName) return;
 
-  const result = await isFunctionDeclared(functionName,"function", undefined, undefined, undefined, undefined, documentRoot);
+  const result = findFunctionDefinition(functionName, params.textDocument.uri, lines, documentRoot);
   if (!result) return;
 
   return {
@@ -651,7 +730,7 @@ const currentWord = textBefore.trim().split(/\s+/).pop()?.toUpperCase() || '';
   const allItems = [...functionItems, ...structItems, ...uniqueKeywordItems];
 
 
-  logMsg=`Variable filtrées: ${JSON.stringify(allItems, null, 2)}`
+  logMsg=`Variable filtrÃ©es: ${JSON.stringify(allItems, null, 2)}`
   
   logToFile(logMsg)
 
@@ -755,7 +834,7 @@ connection.onDocumentSymbol((params: DocumentSymbolParams): DocumentSymbol[] => 
 
 
 // ==================
-// References Request Handler (Shift+F12 / Right-click → Find All References)
+// References Request Handler (Shift+F12 / Right-click â†’ Find All References)
 // ==================
 connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => {
   const doc = documents.get(params.textDocument.uri);
@@ -768,7 +847,7 @@ connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => 
   if (!wordInfo) return [];
 
   const name = wordInfo.word;
-  // Skip pure numeric tokens — \w+ matches them but they're never identifiers
+  // Skip pure numeric tokens â€” \w+ matches them but they're never identifiers
   if (/^\d/.test(name)) return [];
 
   // KRL is case-insensitive; word boundary keeps "Foo" out of "FooBar"
@@ -783,7 +862,7 @@ connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => 
     const uri = URI.file(filePath).toString();
     // Prefer in-memory content so unsaved edits are reflected
     const openDoc = documents.get(uri);
-    const content = openDoc ? openDoc.getText() : fs.readFileSync(filePath, 'utf8');
+    const content = openDoc ? openDoc.getText() : readKrlFile(filePath);
     const fileLines = content.split(/\r?\n/);
 
     for (let i = 0; i < fileLines.length; i++) {
@@ -849,7 +928,7 @@ connection.onFoldingRanges((params: FoldingRangeParams): FoldingRange[] => {
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
 
-    // ;FOLD / ;ENDFOLD — KUKA editor folds. Detect before comment-stripping.
+    // ;FOLD / ;ENDFOLD â€” KUKA editor folds. Detect before comment-stripping.
     if (/^\s*;\s*FOLD\b/i.test(raw)) {
       foldStack.push(i);
       continue;
@@ -869,7 +948,7 @@ connection.onFoldingRanges((params: FoldingRangeParams): FoldingRange[] => {
     const closeMatch = closeRegex.exec(code);
     const closeKw = closeMatch ? closeMatch[1].toUpperCase() : null;
 
-    // Same-line open + matching close (one-liner IF/STRUC) — nothing to fold.
+    // Same-line open + matching close (one-liner IF/STRUC) â€” nothing to fold.
     if (openKw && closeKw && blockOpens[openKw] === closeKw) continue;
 
     if (openKw) {
@@ -889,38 +968,84 @@ connection.onFoldingRanges((params: FoldingRangeParams): FoldingRange[] => {
 });
 
 
+const FUNCTION_DEF_REGEX = /\b(GLOBAL\s+)?(DEF|DEFFCT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
+
+interface ParsedKrlFile {
+  names: string[];                   // Declared variable names, lower case
+  functions: FunctionDeclaration[];
+}
+
+interface ParsedKrlFileCacheEntry extends ParsedKrlFile {
+  mtimeMs: number;
+  size: number;
+}
+
+const parsedFileCache: Map<string, ParsedKrlFileCacheEntry> = new Map();
+
+function parseKrlContent(filePath: string, content: string): ParsedKrlFile {
+  const collector = new DeclaredVariableCollector();
+  collector.extractFromText(content);
+  const names = collector.getVariables().map(variable => variable.name.toLowerCase());
+
+  const functions: FunctionDeclaration[] = [];
+  const uri = URI.file(filePath).toString();
+  const fileLines = content.split(/\r?\n/);
+
+  for (let i = 0; i < fileLines.length; i++) {
+    const line = fileLines[i];
+    const match = FUNCTION_DEF_REGEX.exec(line);
+    if (!match) continue;
+
+    const name = match[3];
+    const startChar = indexOfIdentifierIgnoreCase(line, name);
+    functions.push({
+      name,
+      uri,
+      line: i,
+      startChar,
+      endChar: startChar + name.length,
+      params: match[4].trim(),
+    });
+  }
+
+  return { names, functions };
+}
+
+/**
+ * Parse a workspace file, reusing the previous result while the file on disk is
+ * unchanged. Without this every keystroke would re-read the whole project.
+ */
+function getParsedKrlFile(filePath: string): ParsedKrlFile {
+  const openDocument = documents.get(URI.file(filePath).toString());
+  if (openDocument) {
+    // Unsaved edits must win over whatever is on disk
+    return parseKrlContent(filePath, openDocument.getText());
+  }
+
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(filePath);
+  } catch {
+    return { names: [], functions: [] };
+  }
+
+  const cached = parsedFileCache.get(filePath);
+  if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+    return cached;
+  }
+
+  const parsed = parseKrlContent(filePath, readKrlFile(filePath));
+  parsedFileCache.set(filePath, { ...parsed, mtimeMs: stats.mtimeMs, size: stats.size });
+  return parsed;
+}
+
 function getAllFunctionDeclarations(rootDir?: string): FunctionDeclaration[] {
   const searchRoot = rootDir ?? workspaceRoot;
   if (!searchRoot) return [];
 
-  const files = getAllKrlFiles(searchRoot);
-  const defRegex = /\b(GLOBAL\s+)?(DEF|DEFFCT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
-
   const allDeclarations: FunctionDeclaration[] = [];
-
-  for (const filePath of files) {
-    const content = fs.readFileSync(filePath, 'utf8');
-    const fileLines = content.split(/\r?\n/);
-
-    for (let i = 0; i < fileLines.length; i++) {
-      const line = fileLines[i];
-      const match = defRegex.exec(line);
-      if (match) {
-        const name = match[3];
-        const params = match[4].trim();
-        const startChar = indexOfIdentifierIgnoreCase(line, name);
-        const uri = URI.file(filePath).toString();
-
-        allDeclarations.push({
-          name,
-          uri,
-          line: i,
-          startChar,
-          endChar: startChar + name.length,
-          params,
-        });
-      }
-    }
+  for (const filePath of getAllKrlFiles(searchRoot)) {
+    allDeclarations.push(...getParsedKrlFile(filePath).functions);
   }
 
   return allDeclarations;
@@ -939,35 +1064,183 @@ function getAllFunctionDeclarations(rootDir?: string): FunctionDeclaration[] {
  * Find DEF, DEFCT, DETDAT enclosures lines
  */
 
+const ROUTINE_START_REGEX = /^\s*(?:GLOBAL\s+)?(?:DEFFCT|DEFDAT|DEF)\b/i;
+// Only END, ENDFCT and ENDDAT close a routine; ENDIF, ENDFOR, ENDLOOP and the
+// KUKA ;ENDFOLD markers must not be mistaken for the end of the scope.
+const ROUTINE_END_REGEX = /^\s*(?:ENDFCT|ENDDAT|END)\s*$/i;
+
 function findEnclosuresLines(lineNumber: number, lines: string[]): EnclosuresLines {
-  let row = lineNumber;
-  let result: EnclosuresLines = {
+  const result: EnclosuresLines = {
     upperLine: 0,
     bottomLine: lines.length - 1
   };
 
-  // Search upwards
-  while (row >= 0) {
-    if (lines[row].includes("DEFFCT") || lines[row].includes("DEF") || lines[row].includes("DEFDAT")) {
-      result.upperLine = row+1;
+  for (let row = Math.min(lineNumber, lines.length - 1); row >= 0; row--) {
+    if (ROUTINE_START_REGEX.test(stripLineComment(lines[row]))) {
+      result.upperLine = row + 1;
       break;
     }
-    row--;
   }
 
-  // Reset row to start from original position
-  row = lineNumber;
-
-  // Search downwards
-  while (row < lines.length) {
-    if (lines[row].includes("ENDFCT") || lines[row].includes("END") || lines[row].includes("ENDDAT")) {
-      result.bottomLine = row+1;
+  for (let row = lineNumber; row < lines.length; row++) {
+    if (ROUTINE_END_REGEX.test(stripLineComment(lines[row]))) {
+      result.bottomLine = row;
       break;
     }
-    row++;
   }
 
   return result;
+}
+
+function declarationLocation(filePath: string, line: string, lineNumber: number, name: string): FunctionDeclaration {
+  const uri = filePath.startsWith('file://') ? filePath : URI.file(filePath).toString();
+  const startChar = indexOfIdentifierIgnoreCase(line, name);
+
+  return { uri, line: lineNumber, startChar, endChar: startChar + name.length, params: '', name };
+}
+
+/**
+ * KUKA system data lists hold machine and configuration data that every program
+ * can use, so their declarations count as global even without the GLOBAL keyword.
+ * These are the files starting with '$' ($config.dat, $machine.dat, $custom.dat,
+ * $robcor.dat) and the same names inside a System or Mada folder.
+ */
+function isSystemDataList(filePath: string): boolean {
+  const fileName = path.basename(filePath).toLowerCase();
+  if (fileName.startsWith('$')) return true;
+
+  const folder = path.basename(path.dirname(filePath)).toLowerCase();
+  return (folder === 'system' || folder === 'mada') &&
+    /^(?:config|machine|custom|robcor)\.dat$/.test(fileName);
+}
+
+function findDeclarationInFile(filePath: string, name: string, globalOnly: boolean): FunctionDeclaration | undefined {
+  const fileLines = krlFileContent(filePath).split(/\r?\n/);
+
+  // An explicit DECL/SIGNAL declaration wins over one written without DECL
+  for (const explicitOnly of [true, false]) {
+    for (let i = 0; i < fileLines.length; i++) {
+      const line = fileLines[i];
+      if (globalOnly && !/\bGLOBAL\b/i.test(stripLineComment(line))) continue;
+      if (!declaresVariable(line, name, explicitOnly)) continue;
+
+      return declarationLocation(filePath, line, i, name);
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Find a variable declaration following KRL scoping: the enclosing routine first,
+ * then the .dat file of the same module, and finally GLOBAL declarations in the
+ * other .dat files. Variables declared in a .src/.sub file are local to their
+ * routine, so a declaration in another program file is never a valid target.
+ */
+function findVariableDefinition(
+  name: string,
+  documentUri: string,
+  documentLines: string[],
+  enclosures: EnclosuresLines,
+  root: string
+): FunctionDeclaration | undefined {
+  for (let i = enclosures.upperLine; i <= enclosures.bottomLine && i < documentLines.length; i++) {
+    if (declaresVariable(documentLines[i], name, false)) {
+      return declarationLocation(documentUri, documentLines[i], i, name);
+    }
+  }
+
+  const documentPath = URI.parse(documentUri).fsPath;
+  const moduleDat = documentPath.replace(/\.(src|sub)$/i, '.dat');
+
+  if (moduleDat.toLowerCase() !== documentPath.toLowerCase() && fs.existsSync(moduleDat)) {
+    const moduleResult = findDeclarationInFile(moduleDat, name, false);
+    if (moduleResult) return moduleResult;
+  }
+
+  for (const filePath of getAllKrlFiles(root)) {
+    if (!/\.dat$/i.test(filePath)) continue;
+    if (filePath.toLowerCase() === moduleDat.toLowerCase()) continue;
+
+    // Everything in a system data list is global; elsewhere only GLOBAL counts
+    const globalResult = findDeclarationInFile(filePath, name, !isSystemDataList(filePath));
+    if (globalResult) return globalResult;
+  }
+
+  return undefined;
+}
+
+/**
+ * Find a routine following KRL scoping: a routine without GLOBAL can only be
+ * called inside its own module, so the current file wins and only GLOBAL
+ * routines of other files are considered afterwards.
+ */
+function findFunctionDefinition(
+  name: string,
+  documentUri: string,
+  documentLines: string[],
+  root: string
+): FunctionDeclaration | undefined {
+  const normalizedName = normalizeFunctionName(name);
+
+  const ownResult = findFunctionInLines(documentLines, documentUri, normalizedName, false);
+  if (ownResult) return ownResult;
+
+  const documentPath = URI.parse(documentUri).fsPath.toLowerCase();
+
+  for (const filePath of getAllKrlFiles(root)) {
+    if (filePath.toLowerCase() === documentPath) continue;
+
+    const fileLines = krlFileContent(filePath).split(/\r?\n/);
+    const result = findFunctionInLines(fileLines, URI.file(filePath).toString(), normalizedName, true);
+    if (result) return result;
+  }
+
+  return undefined;
+}
+
+function findFunctionInLines(
+  lines: string[],
+  uri: string,
+  normalizedName: string,
+  globalOnly: boolean
+): FunctionDeclaration | undefined {
+  for (let i = 0; i < lines.length; i++) {
+    const match = FUNCTION_DEF_REGEX.exec(stripLineComment(lines[i]));
+    if (!match) continue;
+    if (globalOnly && !match[1]) continue;
+
+    const declaredName = match[3];
+    if (normalizeFunctionName(declaredName) !== normalizedName) continue;
+
+    const startChar = indexOfIdentifierIgnoreCase(lines[i], declaredName);
+    return {
+      uri,
+      line: i,
+      startChar,
+      endChar: startChar + declaredName.length,
+      params: match[4].trim(),
+      name: declaredName
+    };
+  }
+
+  return undefined;
+}
+
+function findStructDefinition(name: string, root: string): FunctionDeclaration | undefined {
+  const structRegex = new RegExp(`\\b(?:GLOBAL\\s+)?STRUC\\s+${escapeRegExp(name)}\\b`, 'i');
+
+  for (const filePath of getAllKrlFiles(root)) {
+    const fileLines = krlFileContent(filePath).split(/\r?\n/);
+
+    for (let i = 0; i < fileLines.length; i++) {
+      if (!structRegex.test(stripLineComment(fileLines[i]))) continue;
+
+      return declarationLocation(filePath, fileLines[i], i, name);
+    }
+  }
+
+  return undefined;
 }
 
 
@@ -992,21 +1265,18 @@ function getSystemVariableAtPosition(lineText: string, character: number): Syste
 }
 
 function getWordAtPosition(lineText: string, character: number): WordInfo | undefined {
-  const wordMatch = lineText.match(/\b(\w+)\b/g);
-  if (!wordMatch) return;
+  const identifierRegex = new RegExp(KRL_IDENTIFIER_SOURCE, 'g');
+  let match: RegExpExecArray | null;
 
-  let charCount = 0;
-  for (const w of wordMatch) {
-    const start = lineText.indexOf(w, charCount);
-    const end = start + w.length;
+  while ((match = identifierRegex.exec(lineText)) !== null) {
+    const start = match.index;
+    const end = start + match[0].length;
     if (character >= start && character <= end) {
-      const isSubvariable = start > 0 && lineText[start - 1] === '.';
       return {
-        word: w,
-        isSubvariable
+        word: match[0],
+        isSubvariable: start > 0 && lineText[start - 1] === '.'
       };
     }
-    charCount = end;
   }
   return;
 }
@@ -1015,87 +1285,7 @@ function getWordAtPosition(lineText: string, character: number): WordInfo | unde
  * Recursively find .src, .dat, and .sub files in workspace.
  */
 async function findSrcFiles(dir: string): Promise<string[]> {
-  let results: string[] = [];
-  const list = fs.readdirSync(dir);
-  for (const file of list) {
-    const filePath = path.join(dir, file);
-    const stat = fs.statSync(filePath);
-    if (stat && stat.isDirectory()) {
-      const subDirFiles = await findSrcFiles(filePath);
-      results = results.concat(subDirFiles);
-    } else if (
-      file.toLowerCase().endsWith('.src') ||
-      file.toLowerCase().endsWith('.dat') ||
-      file.toLowerCase().endsWith('.sub')
-    ) {
-      results.push(filePath);
-    }
-  }
-  return results;
-}
-
-/**
- * Check if a function with given name is declared in any source file.
- */async function isFunctionDeclared(
-  name: string,
-  mode: string,
-  scopedFilePath?: string,
-  lineStart?: number,
-  lineEnd?: number,
-  fileContentOverride?: string,
-  rootOverride?: string
-): Promise<FunctionDeclaration | undefined> {
-  const searchRoot = rootOverride ?? (scopedFilePath ? getWorkspaceRootForUri(scopedFilePath) : workspaceRoot);
-  if (!searchRoot) return undefined;
-
-  const escapedName = escapeRegExp(name);
-  const normalizedName = normalizeFunctionName(name);
-  const defRegex = mode === "struc"
-    ? new RegExp(`\\b(?:GLOBAL\\s+)?(?:STRUC)\\s+${escapedName}\\b`, 'i')
-    : mode === "variable"
-    ? new RegExp(`\\b(?:GLOBAL\\s+)?(?:DECL|SIGNAL)\\b[^\\n]*\\b${escapedName}\\b`, 'i')
-    : mode === "function"
-    ? /\b(GLOBAL\s+)?(DEF|DEFFCT)\s+(\w+\s+)?(\w+)\s*\(([^)]*)\)/i
-    : undefined;
-
-  if (!defRegex) return undefined;
-
-  const files = scopedFilePath ? [scopedFilePath] : await findSrcFiles(searchRoot);
-
-  for (const filePath of files) {
-    const content = fileContentOverride ?? fs.readFileSync(filePath, 'utf8');
-    const fileLines = content.split(/\r?\n/);
-    
-    const start = lineStart ?? 0;
-    const end = lineEnd ?? fileLines.length;
-
-    for (let i = start; i <= end && i < fileLines.length; i++) {
-      const defLine = fileLines[i];
-      const match = defLine.match(defRegex);
-      if (match) {
-        const declaredName = mode === 'function' ? match[4] : name;
-        if (mode === 'function' && normalizeFunctionName(declaredName) !== normalizedName) {
-          continue;
-        }
-
-        const uri = filePath.startsWith("file://") ? filePath : URI.file(filePath).toString();
-        // KRL is case-insensitive; find the actual declaration spelling.
-        const startChar = indexOfIdentifierIgnoreCase(defLine, declaredName);
-        const params = (mode === 'function' && match[5]) ? match[5].trim() : '';
-
-        return {
-          uri,
-          line: i,
-          startChar,
-          endChar: startChar + declaredName.length,
-          params,
-          name: declaredName
-        };
-      }
-    }
-  }
-
-  return undefined;
+  return getAllKrlFiles(dir);
 }
 
 
@@ -1209,7 +1399,7 @@ function validateUndeclaredIdentifiers(document: TextDocument): Diagnostic[] {
   const knownFunctionNames = getKnownFunctionNames(document.getText(), documentRoot);
   const knownStructNames = new Set(Object.keys(structDefinitions).map(name => name.toLowerCase()));
   const keywordNames = new Set(CODE_KEYWORDS.map(keyword => keyword.toUpperCase()));
-  const identifierRegex = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+  const identifierRegex = new RegExp(KRL_IDENTIFIER_SOURCE, 'g');
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const rawLine = lines[lineIndex];
@@ -1225,6 +1415,7 @@ function validateUndeclaredIdentifiers(document: TextDocument): Diagnostic[] {
       const prev = match.index > 0 ? code[match.index - 1] : '';
       const next = match.index + name.length < code.length ? code[match.index + name.length] : '';
 
+      if (name.startsWith('$')) continue; // System variable
       if (prev === '$' || prev === '#' || prev === '.' || prev === '&') continue;
       if (next === ':') continue;
       if (isStructInitializerField(code, match.index, name.length)) continue;
@@ -1292,14 +1483,8 @@ function getWorkspaceDeclaredNames(root: string | null): Set<string> {
   }
 
   for (const filePath of getAllKrlFiles(root)) {
-    const uri = URI.file(filePath).toString();
-    const openDocument = documents.get(uri);
-    const content = openDocument ? openDocument.getText() : fs.readFileSync(filePath, 'utf8');
-
-    const collector = new DeclaredVariableCollector();
-    collector.extractFromText(content);
-    for (const variable of collector.getVariables()) {
-      declaredNames.add(variable.name.toLowerCase());
+    for (const name of getParsedKrlFile(filePath).names) {
+      declaredNames.add(name);
     }
   }
 
@@ -1330,7 +1515,7 @@ function getFunctionParameterNames(documentText: string): string[] {
       const paramText = rawParam.split(':')[0].trim();
       if (!paramText) continue;
 
-      const identifiers = paramText.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+      const identifiers = paramText.match(new RegExp(KRL_IDENTIFIER_SOURCE, 'g'));
       if (!identifiers || identifiers.length === 0) continue;
 
       const name = identifiers[identifiers.length - 1];
@@ -1458,11 +1643,7 @@ class DeclaredVariableCollector {
       const type = match[3];
       const varList = match[4];
 
-      const varNames = splitVarsRespectingBrackets(varList)
-        .map(name => name.trim())
-        .map(name => name.replace(/\[.*?\]/g, '').trim())  // Remove array brackets
-        .map(name => name.replace(/\s*=\s*.+$/, ''))       // Remove initializations
-        .filter(name => /^[a-zA-Z_]\w*$/.test(name));
+      const varNames = declaredNamesOf(varList);
 
       for (const name of varNames) {
         if (!this.variables.has(name)) {
@@ -1477,11 +1658,7 @@ class DeclaredVariableCollector {
       // ENUM values are not variables
       if (type.toUpperCase() === 'ENUM' || !CODE_KEYWORDS.includes(type.toUpperCase())) continue;
 
-      const varNames = splitVarsRespectingBrackets(match[2])
-        .map(name => name.trim())
-        .map(name => name.replace(/\[.*?\]/g, '').trim())
-        .map(name => name.replace(/\s*=\s*.+$/, ''))
-        .filter(name => /^[a-zA-Z_]\w*$/.test(name));
+      const varNames = declaredNamesOf(match[2]);
 
       for (const name of varNames) {
         if (!this.variables.has(name)) {
@@ -1490,7 +1667,7 @@ class DeclaredVariableCollector {
       }
     }
 
-    const signalRegex = /^\s*(GLOBAL\s+)?SIGNAL\s+([a-zA-Z_]\w*)\b/gim;
+    const signalRegex = new RegExp(`^\\s*(GLOBAL\\s+)?SIGNAL\\s+(${KRL_IDENTIFIER_SOURCE})`, 'gim');
     while ((match = signalRegex.exec(textWithoutStrucs)) !== null) {
       const name = match[2];
       if (!this.variables.has(name)) {
@@ -1506,11 +1683,7 @@ class DeclaredVariableCollector {
         continue;
       }
 
-      const varNames = splitVarsRespectingBrackets(match[2])
-        .map(name => name.trim())
-        .map(name => name.replace(/\[.*?\]/g, '').trim())
-        .map(name => name.replace(/\s*=\s*.+$/, ''))
-        .filter(name => /^[a-zA-Z_$][\w$]*$/.test(name));
+      const varNames = declaredNamesOf(match[2]);
 
       for (const name of varNames) {
         if (!this.variables.has(name)) {
@@ -1546,8 +1719,8 @@ const splitVarsRespectingBrackets = (input: string): string[] => {
 
   for (let i = 0; i < input.length; i++) {
     const char = input[i];
-    if (char === '[') bracketDepth++;
-    if (char === ']') bracketDepth--;
+    if (char === '[' || char === '{') bracketDepth++;
+    if (char === ']' || char === '}') bracketDepth--;
     if (char === ',' && bracketDepth === 0) {
       result.push(current.trim());
       current = '';
@@ -1562,6 +1735,15 @@ const splitVarsRespectingBrackets = (input: string): string[] => {
 // =====================
 // Start LSP Server
 // =====================
+
+// Without these the process would exit on an unexpected error, and VS Code would
+// keep restarting the language server until it gives up.
+process.on('unhandledRejection', reason => {
+  connection.console.error(`KRL: unhandled rejection: ${reason}`);
+});
+process.on('uncaughtException', error => {
+  connection.console.error(`KRL: uncaught exception: ${error instanceof Error ? error.stack : error}`);
+});
 
 connection.listen();
 documents.listen(connection);

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.5] - 2026-10-01
+### Fixed
+- Go to definition and hover now follow KRL scoping rules. For a variable the enclosing routine is searched first, then the `.dat` file of the same module, and finally only `GLOBAL` declarations in other `.dat` files. For a routine the current file wins, and only `GLOBAL DEF`/`GLOBAL DEFFCT` routines of other files are considered afterwards. Variables and routines declared in another `.src`/`.sub` file are local to their module and are no longer offered as a target, so a call to a local `Helper()` no longer jumps into a different module that happens to have a routine of the same name.
+- Declarations in KUKA system data lists count as global even without the `GLOBAL` keyword. This covers files starting with `$` (`$config.dat`, `$machine.dat`, `$custom.dat`, `$robcor.dat`) and the same names inside a `System` or `Mada` folder.
+- Identifiers containing `$`, such as the customer naming scheme `i$VarName`, are parsed as a single name. They were split at the `$` before, which broke go to definition and find all references, and produced a false "not declared" report on the leading fragment as well as a false "Invalid KRL variable name" error.
+- Declarations written without `DECL` are found as definitions. `.dat` files commonly declare as `INT counter=5` or `GLOBAL INT counter=3`, and the definition lookup previously required `DECL` or `SIGNAL` on the line.
+- Variables declared in `.src` and `.sub` files that are not open, in files created while the editor is running, and in unsaved edits of other files are found as well. Only `.dat` files read at startup and currently open documents were considered before.
+- The local scope of a routine is no longer cut short. It ended at the first line containing `END` anywhere, which includes `ENDIF`, `ENDFOR` and the KUKA `;ENDFOLD` markers, and it started at any line containing `DEF`, including comments.
+- An unreadable folder or a directory junction in the project no longer breaks the search. A single one of them made every go to definition request fail silently; junctions pointing at a parent folder are no longer followed forever.
+- Variable lists are split correctly on `{}`, so the second and following points of a line like `DECL POS P1={X 1,…},P2={…}` reach the index.
+
+### Changed
+- Workspace validation reads the KRL files instead of opening each one as a document. Opening them handed every file to the language server at once, which could keep the extension host busy for minutes in large robot projects.
+- The language server caches parsed files by timestamp and size and rebuilds its index on demand instead of re-reading the whole project on every keystroke. In a 400 file test project this took a burst of five edits from 1196 ms down to 116 ms, and opening 150 files from 68 s down to 6.4 s.
+- An unexpected error in the language server is logged instead of ending the server process, so VS Code no longer restarts it until it gives up.
+
+---
+
 ## [1.8.4] - 2026-09-11
 ### Fixed
 - `LOOP`, `ENDLOOP` and `STEP` are no longer reported as undeclared identifiers.

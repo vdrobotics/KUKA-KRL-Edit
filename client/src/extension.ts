@@ -168,19 +168,22 @@ export function activate(context: vscode.ExtensionContext) {
  * Produces diagnostics for variable name length and improper GLOBAL usage
  */
 function validateTextDocument(document: vscode.TextDocument): void {
+  validateKrlText(document.uri, document.getText().split(/\r?\n/));
+}
+
+function validateKrlText(uri: vscode.Uri, lines: string[]): void {
   const cfg = getValidationConfig();
   const diagnostics: vscode.Diagnostic[] = [];
 
   // If all client-side checks are off, just clear stale diagnostics and bail out.
   if (!cfg.variableNameLength && !cfg.variableNameSyntax && !cfg.globalUsage) {
-    diagnosticCollection.set(document.uri, diagnostics);
+    diagnosticCollection.set(uri, diagnostics);
     return;
   }
 
-  for (let i = 0; i < document.lineCount; i++) {
+  for (let i = 0; i < lines.length; i++) {
     try {
-      const line = document.lineAt(i);
-      const fullText = line.text;
+      const fullText = lines[i];
       const lineText = fullText.split(';')[0].trim(); // Ignore comments
       if (lineText.startsWith('&')) continue;
 
@@ -227,7 +230,7 @@ function validateTextDocument(document: vscode.TextDocument): void {
     }
   }
 
-  diagnosticCollection.set(document.uri, diagnostics);
+  diagnosticCollection.set(uri, diagnostics);
 }
 
 function isVariableDeclarationLine(lineText: string): boolean {
@@ -305,7 +308,9 @@ function getStructMemberNames(memberPart: string, offset: number): DeclaredName[
 }
 
 function getInvalidVariableNameReason(name: string): string | undefined {
-  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) {
+  // '$' is allowed inside a name: customer naming schemes such as i$VarName use it,
+  // and a leading '$' marks a system variable, which is checked before this call.
+  if (!/^[A-Za-z][A-Za-z0-9_$]*$/.test(name)) {
     return 'Invalid KRL variable name. Use letters, digits, and underscores, and start with a letter.';
   }
 
@@ -342,25 +347,19 @@ function splitRespectingBrackets(input: string): string[] {
  * Validate all KRL files in the workspace with extensions .src, .dat, .sub
  */
 async function validateAllKrlFiles(): Promise<void> {
-  const patterns = ['**/*.src', '**/*.dat', '**/*.sub'];
-  const uris: vscode.Uri[] = [];
+  const uris = await vscode.workspace.findFiles('**/*.{src,dat,sub,SRC,DAT,SUB}');
 
-  // Collect all matching files
-  for (const pattern of patterns) {
-    const matched = await vscode.workspace.findFiles(pattern);
-    uris.push(...matched);
-  }
-
-  // Validate each file (opening it if needed)
   for (const file of uris) {
     try {
-      let document = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === file.fsPath);
-      if (!document) {
-        document = await vscode.workspace.openTextDocument(file);
-      }
-      if (document.languageId === 'krl') {
-        validateTextDocument(document);
-      }
+      // Read the file instead of opening it as a document. Opening every KRL file
+      // hands all of them to the language server at once, which freezes the
+      // extension host in robot projects with many programs.
+      const openDocument = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === file.fsPath);
+      const text = openDocument
+        ? openDocument.getText()
+        : await fs.promises.readFile(file.fsPath, 'utf8');
+
+      validateKrlText(file, text.split(/\r?\n/));
     } catch (error) {
       console.error(`Failed to validate ${file.fsPath}`, error);
     }
