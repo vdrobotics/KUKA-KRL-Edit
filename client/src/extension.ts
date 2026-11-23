@@ -260,7 +260,8 @@ function getDeclaredNames(fullLine: string): DeclaredName[] {
     return names;
   }
 
-  const declMatch = /^(?:(?:GLOBAL\s+)?DECL\s+(?:GLOBAL\s+)?|GLOBAL\s+)(?:CONST\s+)?([A-Za-z][A-Za-z0-9_]*)\s+(.+)$/i.exec(trimmed);
+  // Type names may contain '$', e.g. DECL TYP$MSG_DLG ST$MSG_DLG in $config.dat
+  const declMatch = /^(?:(?:GLOBAL\s+)?DECL\s+(?:GLOBAL\s+)?|GLOBAL\s+)(?:CONST\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s+(.+)$/i.exec(trimmed);
   if (!declMatch) return [];
 
   const varPart = declMatch[2];

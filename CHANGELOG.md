@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.6] - 2026-11-23
+### Fixed
+- Declarations whose type name contains `$`, such as `DECL TYP$MSG_DLG ST$MSG_DLG` in `$config.dat`, reach the index. The type was matched as a plain word before, so the declared variable was reported as "not declared" everywhere and go to definition found nothing.
+- The KRL string functions `StrCopy`, `StrFind`, `StrDeclLen`, `SREAD`, `CREAD` and the `StrTo…` conversions (`StrToBool`, `StrToInt`, `StrToReal`, `StrToString`, `StrToFrame`, `StrToPos`, `StrToE3Pos`, `StrToE6Pos`, `StrToAxis`, `StrToE3Axis`, `StrToE6Axis`) are no longer reported as undeclared identifiers and are offered as completions.
+- The editor treats a name with `$` inside, such as `ST$MSG_DLG` or `$VEL_AXIS`, as one word. Ctrl+click, double-click and word highlighting stopped at the `$` before, so a click on `ST$MSG_DLG` underlined only `MSG_DLG`.
+- A `$` inside a name no longer starts a system variable. Hovering `i$ACC` showed the description of `$ACC`, and typing `ST$` offered the whole list of system variables.
+- The hover of a system variable shows a dash between name and type again instead of the garbled characters `â€”`.
+
+---
+
 ## [1.8.5] - 2026-10-01
 ### Fixed
 - Go to definition and hover now follow KRL scoping rules. For a variable the enclosing routine is searched first, then the `.dat` file of the same module, and finally only `GLOBAL` declarations in other `.dat` files. For a routine the current file wins, and only `GLOBAL DEF`/`GLOBAL DEFFCT` routines of other files are considered afterwards. Variables and routines declared in another `.src`/`.sub` file are local to their module and are no longer offered as a target, so a call to a local `Helper()` no longer jumps into a different module that happens to have a routine of the same name.

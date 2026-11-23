@@ -112,6 +112,9 @@ const CODE_KEYWORDS = [
     'CIRC', 'SPLINE', 'ENDSPLINE', 'LIN_REL', 'PTP_REL', 'SLIN', 'SPTP', 'SCIRC', 'SPL', 'ENDSPL', 'WAITFOR', 'STRLEN',
     'CWRITE', 'SWRITE', 'STRCOMP', 'IS_KEY_PRESSED', 'CLEAR_KRLMSG', 'SET_KRLMSG', 'ERR_RAISE', 'EXOR', 'EXIT', 'CHANNEL', 'EXT',
     'STRADD', 'STRCLEAR', 'EXISTS_KRLMSG', 'EXISTS_KRLDLG', 'SET_KRLDLG',
+    'STRCOPY', 'STRFIND', 'STRDECLLEN', 'SREAD', 'CREAD',
+    'STRTOBOOL', 'STRTOINT', 'STRTOREAL', 'STRTOSTRING', 'STRTOFRAME', 'STRTOPOS',
+    'STRTOE3POS', 'STRTOE6POS', 'STRTOAXIS', 'STRTOE3AXIS', 'STRTOE6AXIS',
     'LK', 'EK', 'EB', 'EO', 'EB_ABS', 'INV_POS',
     'VARSTATE', 'WITH', 'MBX_REC', 'SYNC', 'EB_TEST', 'TEST_BRAKE',
     'INTTOSTRWITHPREFIX', 'GET_COLLMON_SET',
@@ -218,11 +221,14 @@ function indexOfIdentifierIgnoreCase(text, identifier) {
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-// KRL identifiers may contain '$' â€” system variables like $VEL_ACT start with it,
+// KRL identifiers may contain '$' — system variables like $VEL_ACT start with it,
 // and customer naming schemes like i$VarName use it inside the name. Matching with
 // '\w' alone splits those names apart, so identifier handling uses these patterns.
 const KRL_IDENTIFIER_SOURCE = '[A-Za-z_$][A-Za-z0-9_$]*';
 const KRL_IDENTIFIER_NAME = new RegExp(`^${KRL_IDENTIFIER_SOURCE}$`);
+// A system variable token starts with '$' that is not part of a longer name, so the
+// '$MSG_DLG' inside a user name like 'ST$MSG_DLG' is not taken for a system variable.
+const SYSTEM_VARIABLE_START = '(?<![A-Za-z0-9_$])\\$';
 /** Predefined KRL data types, used to spot declarations written without DECL. */
 const PREDEFINED_TYPE_NAMES = [
     'INT', 'REAL', 'BOOL', 'CHAR', 'FRAME', 'POS', 'E6POS', 'AXIS', 'E6AXIS',
@@ -474,7 +480,7 @@ connection.onHover((params) => __awaiter(void 0, void 0, void 0, function* () {
         return {
             contents: {
                 kind: 'markdown',
-                value: `**${systemVar.var_name}** â€” *${systemVar.var_type}*\n\n${systemVar.var_descr}`
+                value: `**${systemVar.var_name}** — *${systemVar.var_type}*\n\n${systemVar.var_descr}`
             }
         };
     }
@@ -507,8 +513,8 @@ connection.onCompletion((params) => __awaiter(void 0, void 0, void 0, function* 
     const lines = document.getText().split(/\r?\n/);
     // === 1. Struct field completions ===
     const variableStructTypes = {};
+    const declRegex = new RegExp(`^(?:GLOBAL\\s+)?(?:DECL\\s+)?(?:GLOBAL\\s+)?(${KRL_IDENTIFIER_SOURCE})\\s+(${KRL_IDENTIFIER_SOURCE})`, 'i');
     for (const line of lines) {
-        const declRegex = /^(?:GLOBAL\s+)?(?:DECL\s+)?(?:GLOBAL\s+)?(\w+)\s+(\w+)/i;
         const match = declRegex.exec(line.trim());
         if (match) {
             const type = match[1];
@@ -518,7 +524,7 @@ connection.onCompletion((params) => __awaiter(void 0, void 0, void 0, function* 
     }
     const line = lines[params.position.line];
     const textBefore = line.substring(0, params.position.character);
-    const dotMatch = textBefore.match(/(\w+)\.$/);
+    const dotMatch = textBefore.match(new RegExp(`(${KRL_IDENTIFIER_SOURCE})\\.$`));
     const structItems = [];
     if (dotMatch) {
         const varName = dotMatch[1];
@@ -534,7 +540,7 @@ connection.onCompletion((params) => __awaiter(void 0, void 0, void 0, function* 
         return structItems;
     }
     // === 1b. System variable completions (after '$') ===
-    const dollarMatch = textBefore.match(/\$\w*$/);
+    const dollarMatch = textBefore.match(new RegExp(`${SYSTEM_VARIABLE_START}\\w*$`));
     if (dollarMatch) {
         const startChar = params.position.character - dollarMatch[0].length;
         const replaceRange = node_1.Range.create(params.position.line, startChar, params.position.line, params.position.character);
@@ -587,7 +593,7 @@ connection.onCompletion((params) => __awaiter(void 0, void 0, void 0, function* 
     const uniqueKeywordItems = keywordsFiltered.filter(kwItem => !functionItems.some(fnItem => fnItem.label === kwItem.label));
     // === 3. Return all completions (if not after a dot) ===
     const allItems = [...functionItems, ...structItems, ...uniqueKeywordItems];
-    logMsg = `Variable filtrÃ©es: ${JSON.stringify(allItems, null, 2)}`;
+    logMsg = `Variable filtrées: ${JSON.stringify(allItems, null, 2)}`;
     logToFile(logMsg);
     return allItems;
 }));
@@ -668,7 +674,7 @@ connection.onDocumentSymbol((params) => {
     return symbols;
 });
 // ==================
-// References Request Handler (Shift+F12 / Right-click â†’ Find All References)
+// References Request Handler (Shift+F12 / Right-click → Find All References)
 // ==================
 connection.onReferences((params) => __awaiter(void 0, void 0, void 0, function* () {
     const doc = documents.get(params.textDocument.uri);
@@ -681,7 +687,7 @@ connection.onReferences((params) => __awaiter(void 0, void 0, void 0, function* 
     if (!wordInfo)
         return [];
     const name = wordInfo.word;
-    // Skip pure numeric tokens â€” \w+ matches them but they're never identifiers
+    // Skip pure numeric tokens — \w+ matches them but they're never identifiers
     if (/^\d/.test(name))
         return [];
     // KRL is case-insensitive; word boundary keeps "Foo" out of "FooBar"
@@ -750,7 +756,7 @@ connection.onFoldingRanges((params) => {
     const foldStack = [];
     for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
-        // ;FOLD / ;ENDFOLD â€” KUKA editor folds. Detect before comment-stripping.
+        // ;FOLD / ;ENDFOLD — KUKA editor folds. Detect before comment-stripping.
         if (/^\s*;\s*FOLD\b/i.test(raw)) {
             foldStack.push(i);
             continue;
@@ -767,7 +773,7 @@ connection.onFoldingRanges((params) => {
         const openKw = openMatch ? openMatch[1].toUpperCase() : null;
         const closeMatch = closeRegex.exec(code);
         const closeKw = closeMatch ? closeMatch[1].toUpperCase() : null;
-        // Same-line open + matching close (one-liner IF/STRUC) â€” nothing to fold.
+        // Same-line open + matching close (one-liner IF/STRUC) — nothing to fold.
         if (openKw && closeKw && blockOpens[openKw] === closeKw)
             continue;
         if (openKw) {
@@ -1001,7 +1007,7 @@ function findStructDefinition(name, root) {
  */
 // Match a $-prefixed system variable token at the cursor, e.g. $POS_ACT, $ACC_AXIS.
 function getSystemVariableAtPosition(lineText, character) {
-    const tokenRegex = /\$\w+/g;
+    const tokenRegex = new RegExp(`${SYSTEM_VARIABLE_START}\\w+`, 'g');
     let match;
     while ((match = tokenRegex.exec(lineText)) !== null) {
         const start = match.index;
@@ -1256,7 +1262,7 @@ function stripStrings(line) {
 function shouldSkipUndeclaredIdentifierLine(code) {
     return /^\s*&/.test(code) ||
         /^\s*(?:GLOBAL\s+)?(?:DEF|DEFFCT|DEFDAT|END|ENDFCT|ENDDAT|DECL|SIGNAL|STRUC|ENUM)\b/i.test(code) ||
-        /^\s*(?:GLOBAL\s+)?(?:CONST\s+)?[A-Za-z_][A-Za-z0-9_]*\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\[|=|,|;|$))/i.test(code) ||
+        /^\s*(?:GLOBAL\s+)?(?:CONST\s+)?[A-Za-z_][A-Za-z0-9_$]*\s+[A-Za-z_$][A-Za-z0-9_$]*(?:\s*(?:\[|=|,|;|$))/i.test(code) ||
         /^\s*(?:GOTO|HALT|INTERRUPT|ON_ERROR_PROCEED|RESUME|BRAKE|CHANNEL|EXT)\b/i.test(code);
 }
 function isStructInitializerField(code, start, length) {
@@ -1290,7 +1296,7 @@ function isDuplicateDiagnostic(newDiag, existingDiagnostics) {
  * Updates global structDefinitions map.
  */
 function extractStrucVariables(datContent) {
-    const structRegex = /^[ \t]*(?:GLOBAL\s+)?(?:DECL\s+)?(?:GLOBAL\s+)?(STRUC|ENUM)\s+(\w+)\s+(.+)$/gm;
+    const structRegex = new RegExp(`^[ \\t]*(?:GLOBAL\\s+)?(?:DECL\\s+)?(?:GLOBAL\\s+)?(STRUC|ENUM)\\s+(${KRL_IDENTIFIER_SOURCE})\\s+(.+)$`, 'gm');
     const knownTypes = ['INT', 'REAL', 'BOOL', 'CHAR', 'STRING', 'FRAME', 'ENUM'];
     const tempStructDefinitions = {};
     let match;
@@ -1328,8 +1334,9 @@ class DeclaredVariableCollector {
     extractFromText(documentText) {
         // Remove STRUC blocks (non-greedy match)
         const textWithoutStrucs = documentText.replace(/STRUC\s+\w+[^]*?ENDSTRUC/gi, '');
-        // Match DECL statements with optional GLOBAL before or after
-        const declRegex = /^\s*(GLOBAL\s+)?DECL\s+(GLOBAL\s+)?(?:CONST\s+)?(\w+)\s+([^\r\n;]+)/gim;
+        // Match DECL statements with optional GLOBAL before or after. Type names may
+        // contain '$' (e.g. DECL TYP$MSG_DLG ST$MSG_DLG in $config.dat).
+        const declRegex = new RegExp(`^\\s*(GLOBAL\\s+)?DECL\\s+(GLOBAL\\s+)?(?:CONST\\s+)?(${KRL_IDENTIFIER_SOURCE})\\s+([^\\r\\n;]+)`, 'gim');
         let match;
         while ((match = declRegex.exec(textWithoutStrucs)) !== null) {
             const type = match[3];
@@ -1361,7 +1368,7 @@ class DeclaredVariableCollector {
                 this.variables.set(name, 'SIGNAL');
             }
         }
-        const typedDataRegex = /^\s*(?:GLOBAL\s+)?(?:CONST\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([^\r\n;]+)/gim;
+        const typedDataRegex = /^\s*(?:GLOBAL\s+)?(?:CONST\s+)?([A-Za-z_][A-Za-z0-9_$]*)\s+([^\r\n;]+)/gim;
         while ((match = typedDataRegex.exec(textWithoutStrucs)) !== null) {
             const type = match[1];
             const upperType = type.toUpperCase();
