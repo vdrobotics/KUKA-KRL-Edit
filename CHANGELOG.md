@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.7] - 2026-11-24
+### Fixed
+- The approximation criterion `C_SPL` is no longer reported as an undeclared identifier. The same applies to `PTP_SPLINE`, `SPTP_REL`, `SLIN_REL`, `SCIRC_REL`, `CONST_VEL` and `ONSTART`. These keywords are now also offered as completions.
+- `SPTP`, `C_SPL` and the other spline keywords above are highlighted as motion keywords.
+
+---
+
 ## [1.8.6] - 2026-11-23
 ### Fixed
 - Declarations whose type name contains `$`, such as `DECL TYP$MSG_DLG ST$MSG_DLG` in `$config.dat`, reach the index. The type was matched as a plain word before, so the declared variable was reported as "not declared" everywhere and go to definition found nothing.
