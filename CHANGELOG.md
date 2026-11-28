@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ## [1.8.9] - 2026-11-28
 ### Added
+- The routines of the KSS system modules `$OPERATE` and `$OPERATE_2` (KSS 9.2 to 9.3.4), such as `SET_POSITION_CTRL`, `GET_SYSTEM_DATA`, `ROUND` or `SET_CART_IMPEDANCE_CTRL`, are known without any file in the workspace: 94 names were added to the built-in list. Calls are no longer reported as undeclared, and the names are offered as completions.
 - Declarations of external routines (`EXT`, `EXTFCT`, and `EXTP`/`EXTFCTP` as written in the system modules `$OPERATE`/`$OPERATE_2`) count as known routines. Calls of such routines are no longer reported as undeclared, and go to definition and hover use the declaration when no `DEF`/`DEFFCT` of that name exists. A real definition always wins over an `EXT` declaration. In other files only `GLOBAL` declarations and declarations in system files (names starting with `$`) are considered.
 
 ---
