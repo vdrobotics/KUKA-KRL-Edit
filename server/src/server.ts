@@ -279,6 +279,23 @@ documents.onDidOpen(change => {
   }
 });
 
+// Files created, changed or deleted outside the editor (another tool, a sync, git)
+// were only picked up after some document was opened or edited.
+connection.onDidChangeWatchedFiles(params => {
+  try {
+    for (const change of params.changes) {
+      invalidateWorkspaceCachesForDocument(change.uri);
+    }
+    for (const document of documents.all()) {
+      if (isKrlDocument(document)) {
+        validateDocument(document, connection);
+      }
+    }
+  } catch (error) {
+    connection.console.error(`KRL: processing changed files failed: ${error}`);
+  }
+});
+
 // ===================
 // File and Variables Utilities
 // ===================
@@ -1180,9 +1197,10 @@ function findVariableDefinition(
 }
 
 /**
- * Find a routine following KRL scoping: a routine without GLOBAL can only be
- * called inside its own module, so the current file wins and only GLOBAL
- * routines of other files are considered afterwards.
+ * Find a routine following KRL scoping: the current file wins. Of the other
+ * files only GLOBAL routines count, plus the main routine of a .src/.sub file:
+ * its first routine, named like the module, can be called from everywhere
+ * (e.g. BAS in bas.src) without being declared GLOBAL.
  */
 function findFunctionDefinition(
   name: string,
@@ -1201,25 +1219,36 @@ function findFunctionDefinition(
     if (filePath.toLowerCase() === documentPath) continue;
 
     const fileLines = krlFileContent(filePath).split(/\r?\n/);
-    const result = findFunctionInLines(fileLines, URI.file(filePath).toString(), normalizedName, true);
+    const result = findFunctionInLines(fileLines, URI.file(filePath).toString(), normalizedName, true, mainRoutineName(filePath));
     if (result) return result;
   }
 
   return undefined;
 }
 
+/** Normalized module name of a .src/.sub file, undefined for other files. */
+function mainRoutineName(filePath: string): string | undefined {
+  const match = /^(.+)\.(src|sub)$/i.exec(path.basename(filePath));
+  return match ? normalizeFunctionName(match[1]) : undefined;
+}
+
 function findFunctionInLines(
   lines: string[],
   uri: string,
   normalizedName: string,
-  globalOnly: boolean
+  globalOnly: boolean,
+  moduleName?: string
 ): FunctionDeclaration | undefined {
+  let firstRoutine = true;
   for (let i = 0; i < lines.length; i++) {
     const match = FUNCTION_DEF_REGEX.exec(stripLineComment(lines[i]));
     if (!match) continue;
-    if (globalOnly && !match[1]) continue;
 
     const declaredName = match[3];
+    const isMainRoutine = firstRoutine && moduleName !== undefined && normalizeFunctionName(declaredName) === moduleName;
+    firstRoutine = false;
+    if (globalOnly && !match[1] && !isMainRoutine) continue;
+
     if (normalizeFunctionName(declaredName) !== normalizedName) continue;
 
     const startChar = indexOfIdentifierIgnoreCase(lines[i], declaredName);

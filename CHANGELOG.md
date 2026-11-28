@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.8] - 2026-11-28
+### Fixed
+- Go to definition and hover find the main routine of another module, such as `BAS` in `bas.src` or `IR_STOPM` in `ir_stopm.src`. The first routine of a `.src`/`.sub` file, named like the module, can be called from everywhere without `GLOBAL`; only `GLOBAL` routines of other files were considered before. Other routines without `GLOBAL` stay local to their module.
+- Files created, changed or deleted outside the editor, for example by a sync tool or git, are picked up right away. Their declarations were only seen after some document had been opened or edited, so go to definition found nothing for a new file and open documents kept stale "not declared" reports.
+
+---
+
 ## [1.8.7] - 2026-11-24
 ### Fixed
 - The approximation criterion `C_SPL` is no longer reported as an undeclared identifier. The same applies to `PTP_SPLINE`, `SPTP_REL`, `SLIN_REL`, `SCIRC_REL`, `CONST_VEL` and `ONSTART`. These keywords are now also offered as completions.
