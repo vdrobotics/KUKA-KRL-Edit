@@ -810,8 +810,11 @@ connection.onFoldingRanges((params) => {
     return ranges;
 });
 const FUNCTION_DEF_REGEX = /\b(GLOBAL\s+)?(DEF|DEFFCT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
+// Declarations of external routines: EXT/EXTFCT, and EXTP/EXTFCTP as used by the system modules ($OPERATE)
+const EXTERNAL_DECL_REGEX = /^\s*(GLOBAL\s+)?(EXTFCTP|EXTFCT|EXTP|EXT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
 const parsedFileCache = new Map();
 function parseKrlContent(filePath, content) {
+    var _a;
     const collector = new DeclaredVariableCollector();
     collector.extractFromText(content);
     const names = collector.getVariables().map(variable => variable.name.toLowerCase());
@@ -820,7 +823,7 @@ function parseKrlContent(filePath, content) {
     const fileLines = content.split(/\r?\n/);
     for (let i = 0; i < fileLines.length; i++) {
         const line = fileLines[i];
-        const match = FUNCTION_DEF_REGEX.exec(line);
+        const match = (_a = FUNCTION_DEF_REGEX.exec(line)) !== null && _a !== void 0 ? _a : EXTERNAL_DECL_REGEX.exec(stripLineComment(line));
         if (!match)
             continue;
         const name = match[3];
@@ -977,13 +980,45 @@ function findFunctionDefinition(name, documentUri, documentLines, root) {
     if (ownResult)
         return ownResult;
     const documentPath = vscode_uri_1.URI.parse(documentUri).fsPath.toLowerCase();
-    for (const filePath of getAllKrlFiles(root)) {
-        if (filePath.toLowerCase() === documentPath)
-            continue;
+    const otherFiles = getAllKrlFiles(root).filter(filePath => filePath.toLowerCase() !== documentPath);
+    for (const filePath of otherFiles) {
         const fileLines = krlFileContent(filePath).split(/\r?\n/);
         const result = findFunctionInLines(fileLines, vscode_uri_1.URI.file(filePath).toString(), normalizedName, true, mainRoutineName(filePath));
         if (result)
             return result;
+    }
+    // A real DEF wins; an EXT declaration is the target only when no definition
+    // exists, e.g. for routines of the system modules
+    const ownExternal = findExternalDeclaration(documentLines, documentUri, normalizedName, false);
+    if (ownExternal)
+        return ownExternal;
+    for (const filePath of otherFiles) {
+        const fileLines = krlFileContent(filePath).split(/\r?\n/);
+        const result = findExternalDeclaration(fileLines, vscode_uri_1.URI.file(filePath).toString(), normalizedName, !isSystemDataList(filePath));
+        if (result)
+            return result;
+    }
+    return undefined;
+}
+function findExternalDeclaration(lines, uri, normalizedName, globalOnly) {
+    for (let i = 0; i < lines.length; i++) {
+        const match = EXTERNAL_DECL_REGEX.exec(stripLineComment(lines[i]));
+        if (!match)
+            continue;
+        if (globalOnly && !match[1])
+            continue;
+        const declaredName = match[3];
+        if (normalizeFunctionName(declaredName) !== normalizedName)
+            continue;
+        const startChar = indexOfIdentifierIgnoreCase(lines[i], declaredName);
+        return {
+            uri,
+            line: i,
+            startChar,
+            endChar: startChar + declaredName.length,
+            params: match[4].trim(),
+            name: declaredName
+        };
     }
     return undefined;
 }

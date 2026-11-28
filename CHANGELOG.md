@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.9] - 2026-11-28
+### Added
+- Declarations of external routines (`EXT`, `EXTFCT`, and `EXTP`/`EXTFCTP` as written in the system modules `$OPERATE`/`$OPERATE_2`) count as known routines. Calls of such routines are no longer reported as undeclared, and go to definition and hover use the declaration when no `DEF`/`DEFFCT` of that name exists. A real definition always wins over an `EXT` declaration. In other files only `GLOBAL` declarations and declarations in system files (names starting with `$`) are considered.
+
+---
+
 ## [1.8.8] - 2026-11-28
 ### Fixed
 - Go to definition and hover find the main routine of another module, such as `BAS` in `bas.src` or `IR_STOPM` in `ir_stopm.src`. The first routine of a `.src`/`.sub` file, named like the module, can be called from everywhere without `GLOBAL`; only `GLOBAL` routines of other files were considered before. Other routines without `GLOBAL` stay local to their module.

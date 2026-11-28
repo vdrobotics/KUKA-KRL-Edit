@@ -995,6 +995,8 @@ connection.onFoldingRanges((params: FoldingRangeParams): FoldingRange[] => {
 
 
 const FUNCTION_DEF_REGEX = /\b(GLOBAL\s+)?(DEF|DEFFCT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
+// Declarations of external routines: EXT/EXTFCT, and EXTP/EXTFCTP as used by the system modules ($OPERATE)
+const EXTERNAL_DECL_REGEX = /^\s*(GLOBAL\s+)?(EXTFCTP|EXTFCT|EXTP|EXT)\s+(?:\w+\s+)?(\w+)\s*\(([^)]*)\)/i;
 
 interface ParsedKrlFile {
   names: string[];                   // Declared variable names, lower case
@@ -1019,7 +1021,7 @@ function parseKrlContent(filePath: string, content: string): ParsedKrlFile {
 
   for (let i = 0; i < fileLines.length; i++) {
     const line = fileLines[i];
-    const match = FUNCTION_DEF_REGEX.exec(line);
+    const match = FUNCTION_DEF_REGEX.exec(line) ?? EXTERNAL_DECL_REGEX.exec(stripLineComment(line));
     if (!match) continue;
 
     const name = match[3];
@@ -1214,13 +1216,51 @@ function findFunctionDefinition(
   if (ownResult) return ownResult;
 
   const documentPath = URI.parse(documentUri).fsPath.toLowerCase();
+  const otherFiles = getAllKrlFiles(root).filter(filePath => filePath.toLowerCase() !== documentPath);
 
-  for (const filePath of getAllKrlFiles(root)) {
-    if (filePath.toLowerCase() === documentPath) continue;
-
+  for (const filePath of otherFiles) {
     const fileLines = krlFileContent(filePath).split(/\r?\n/);
     const result = findFunctionInLines(fileLines, URI.file(filePath).toString(), normalizedName, true, mainRoutineName(filePath));
     if (result) return result;
+  }
+
+  // A real DEF wins; an EXT declaration is the target only when no definition
+  // exists, e.g. for routines of the system modules
+  const ownExternal = findExternalDeclaration(documentLines, documentUri, normalizedName, false);
+  if (ownExternal) return ownExternal;
+
+  for (const filePath of otherFiles) {
+    const fileLines = krlFileContent(filePath).split(/\r?\n/);
+    const result = findExternalDeclaration(fileLines, URI.file(filePath).toString(), normalizedName, !isSystemDataList(filePath));
+    if (result) return result;
+  }
+
+  return undefined;
+}
+
+function findExternalDeclaration(
+  lines: string[],
+  uri: string,
+  normalizedName: string,
+  globalOnly: boolean
+): FunctionDeclaration | undefined {
+  for (let i = 0; i < lines.length; i++) {
+    const match = EXTERNAL_DECL_REGEX.exec(stripLineComment(lines[i]));
+    if (!match) continue;
+    if (globalOnly && !match[1]) continue;
+
+    const declaredName = match[3];
+    if (normalizeFunctionName(declaredName) !== normalizedName) continue;
+
+    const startChar = indexOfIdentifierIgnoreCase(lines[i], declaredName);
+    return {
+      uri,
+      line: i,
+      startChar,
+      endChar: startChar + declaredName.length,
+      params: match[4].trim(),
+      name: declaredName
+    };
   }
 
   return undefined;
